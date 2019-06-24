@@ -14,24 +14,24 @@ using TLSharp.Utils;
 
 namespace TLSharp.Network
 {
-    public class MtProtoSender
+    internal class MtProtoSender
     {
         //private ulong sessionId = GenerateRandomUlong();
 
         private readonly TcpTransport _transport;
-        private readonly Session _session;
+        private readonly TelegramClient _client;
 
         public readonly List<ulong> needConfirmation = new List<ulong>();
 
-        public MtProtoSender(TcpTransport transport, Session session)
+        public MtProtoSender(TcpTransport transport, TelegramClient client)
         {
             _transport = transport;
-            _session = session;
+            _client = client;
         }
 
         private int GenerateSequence(bool confirmed)
         {
-            return confirmed ? _session.Sequence++ * 2 + 1 : _session.Sequence * 2;
+            return confirmed ? _client._session.Sequence++ * 2 + 1 : _client._session.Sequence * 2;
         }
 
         public async Task Send(TLSchema.TLMethod request)
@@ -57,12 +57,12 @@ namespace TLSharp.Network
                 await Send(memory.ToArray(), request);
             }
 
-            _session.Save();
+            _client.RaiseSessionChanged();
         }
 
         public async Task Send(byte[] packet, TLSchema.TLMethod request)
         {
-            request.MessageId = _session.GetNewMessageId();
+            request.MessageId = _client._session.GetNewMessageId();
 
             byte[] msgKey;
             byte[] ciphertext;
@@ -70,15 +70,15 @@ namespace TLSharp.Network
             {
                 using (BinaryWriter plaintextWriter = new BinaryWriter(plaintextPacket))
                 {
-                    plaintextWriter.Write(_session.Salt);
-                    plaintextWriter.Write(_session.Id);
+                    plaintextWriter.Write(_client._session.Salt);
+                    plaintextWriter.Write(_client._session.Id);
                     plaintextWriter.Write(request.MessageId);
                     plaintextWriter.Write(GenerateSequence(request.Confirmed));
                     plaintextWriter.Write(packet.Length);
                     plaintextWriter.Write(packet);
 
                     msgKey = Helpers.CalcMsgKey(plaintextPacket.GetBuffer());
-                    ciphertext = AES.EncryptAES(Helpers.CalcKey(_session.AuthKey.Data, msgKey, true), plaintextPacket.GetBuffer());
+                    ciphertext = AES.EncryptAES(Helpers.CalcKey(_client._session.AuthKey.Data, msgKey, true), plaintextPacket.GetBuffer());
                 }
             }
 
@@ -86,7 +86,7 @@ namespace TLSharp.Network
             {
                 using (BinaryWriter writer = new BinaryWriter(ciphertextPacket))
                 {
-                    writer.Write(_session.AuthKey.Id);
+                    writer.Write(_client._session.AuthKey.Id);
                     writer.Write(msgKey);
                     writer.Write(ciphertext);
 
@@ -109,7 +109,7 @@ namespace TLSharp.Network
 
                 ulong remoteAuthKeyId = inputReader.ReadUInt64(); // TODO: check auth key id
                 byte[] msgKey = inputReader.ReadBytes(16); // TODO: check msg_key correctness
-                AESKeyData keyData = Helpers.CalcKey(_session.AuthKey.Data, msgKey, false);
+                AESKeyData keyData = Helpers.CalcKey(_client._session.AuthKey.Data, msgKey, false);
 
                 byte[] plaintext = AES.DecryptAES(keyData, inputReader.ReadBytes((int)(inputStream.Length - inputStream.Position)));
 
@@ -427,7 +427,7 @@ namespace TLSharp.Network
 
             //logger.debug("bad_server_salt: msgid {0}, seq {1}, errorcode {2}, newsalt {3}", badMsgId, badMsgSeqNo, errorCode, newSalt);
 
-            _session.Salt = newSalt;
+            _client._session.Salt = newSalt;
 
             //resend
             Send(request);

@@ -4,7 +4,7 @@ using System.Text;
 
 namespace TLSharp.MTProto
 {
-    public class Serializers
+    internal class Serializers
     {
 
         public static class Bytes

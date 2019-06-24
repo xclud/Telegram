@@ -23,28 +23,20 @@ namespace TLSharp
     {
         private MtProtoSender _sender;
         private TcpTransport _transport;
-        private string _apiHash = "";
-        private int _apiId = 0;
-        private Session _session;
+        private string _apiHash;
+        private int _apiId;
+        internal Session _session;
         private List<TLDcOption> dcOptions;
         private TcpClientConnectionHandler _handler;
+        public event Action<Session> OnSessionChanged;
 
-        public TelegramClient(int apiId, string apiHash,
-            ISessionStore store = null, string sessionUserId = "session", TcpClientConnectionHandler handler = null)
+        public TelegramClient(int apiId, string apiHash, Session session = null, TcpClientConnectionHandler handler = null)
         {
-            if (apiId == default(int))
-                throw new MissingApiConfigurationException("API_ID");
-            if (string.IsNullOrEmpty(apiHash))
-                throw new MissingApiConfigurationException("API_HASH");
-
-            if (store == null)
-                store = new FileSessionStore();
-
             _apiHash = apiHash;
             _apiId = apiId;
             _handler = handler;
 
-            _session = Session.TryLoadOrCreateNew(store, sessionUserId);
+            _session = session?.Clone() ?? Session.New();
             _transport = new TcpTransport(_session.DataCenter.Address, _session.DataCenter.Port, _handler);
         }
 
@@ -55,9 +47,11 @@ namespace TLSharp
                 var result = await Authenticator.DoAuthentication(_transport);
                 _session.AuthKey = result.AuthKey;
                 _session.TimeOffset = result.TimeOffset;
+
+                RaiseSessionChanged();
             }
 
-            _sender = new MtProtoSender(_transport, _session);
+            _sender = new MtProtoSender(_transport, this);
 
             //set-up layer
             var config = new TLRequestGetConfig();
@@ -139,6 +133,10 @@ namespace TLSharp
             return _session.TLUser != null;
         }
 
+        internal void RaiseSessionChanged()
+        {
+            OnSessionChanged?.Invoke(this._session);
+        }
         public async Task<bool> IsPhoneRegisteredAsync(string phoneNumber)
         {
             if (String.IsNullOrWhiteSpace(phoneNumber))
@@ -369,7 +367,7 @@ namespace TLSharp
             _session.TLUser = TLUser;
             _session.SessionExpires = int.MaxValue;
 
-            _session.Save();
+            RaiseSessionChanged();
         }
 
         public bool IsConnected
